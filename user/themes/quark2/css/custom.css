@@ -1,6 +1,241 @@
-/*
- * Quark 2 — user customizations
- *
- * This file is safe to edit. It is loaded last so anything here overrides
- * theme.css without having to mark rules !important.
- */
+/* ==========================================================================
+   Privacidad.ec — Apple Privacy Design System
+   ========================================================================== */
+
+/* Dark Mode as Default and Primary Theme */
+:root,
+:root[data-theme='dark'],
+html[data-theme='dark'],
+body {
+  background-color: #000000 !important;
+  color: #f5f5f7;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "Inter", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Header / Navigation — Apple Frosted Glass */
+#header,
+.header-fixed #header,
+header.navbar,
+.nav-wrapper {
+  background: rgba(0, 0, 0, 0.8) !important;
+  backdrop-filter: saturate(180%) blur(20px) !important;
+  -webkit-backdrop-filter: saturate(180%) blur(20px) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  transition: background-color 0.4s ease, border-color 0.4s ease;
+}
+
+/* Header nav links */
+.navbar section.navbar-section a,
+.navbar a {
+  color: #86868b !important;
+  transition: color 0.2s ease;
+}
+
+.navbar section.navbar-section a:hover,
+.navbar a:hover,
+.navbar section.navbar-section a.active {
+  color: #f5f5f7 !important;
+}
+
+/* Logo toggling */
+.logo-mode-light { display: none !important; }
+.logo-mode-dark { display: block !important; }
+
+:root[data-theme='light'] .logo-mode-dark { display: none !important; }
+:root[data-theme='light'] .logo-mode-light { display: block !important; }
+
+/* Apple Privacy Hero Section */
+.apple-privacy-hero {
+  background-color: #000000;
+  padding-top: clamp(4rem, 8vw, 6.5rem);
+  padding-bottom: clamp(3rem, 6vw, 5rem);
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.apple-hero-container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+.apple-hero-eyebrow {
+  display: inline-block;
+  font-size: clamp(0.95rem, 1.4vw, 1.15rem);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #86868b;
+  margin-bottom: 1rem;
+}
+
+.apple-hero-title {
+  font-size: clamp(2.6rem, 6vw, 4.6rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.06;
+  color: #f5f5f7;
+  max-width: 900px;
+  margin: 0 auto 1.5rem;
+}
+
+.apple-hero-subtitle {
+  font-size: clamp(1.15rem, 2.2vw, 1.45rem);
+  font-weight: 400;
+  line-height: 1.45;
+  color: #a1a1a6;
+  max-width: 760px;
+  margin: 0 auto 3rem;
+}
+
+.apple-hero-media {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  max-width: 980px;
+  margin: 0 auto;
+  border-radius: 28px;
+  overflow: hidden;
+  box-shadow: 0 25px 90px rgba(0, 0, 0, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.apple-hero-portrait {
+  width: 100%;
+  height: auto;
+  display: block;
+  object-fit: cover;
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.apple-hero-media:hover .apple-hero-portrait {
+  transform: scale(1.015);
+}
+
+/* Subtle gradient mask so the hero image seamlessly merges into pure black */
+.apple-hero-media::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at center, transparent 65%, rgba(0, 0, 0, 0.4) 100%),
+              linear-gradient(to bottom, transparent 80%, rgba(0, 0, 0, 0.6) 100%);
+}
+
+/* Blog Content & Cards Section */
+#body-wrapper,
+.blog-listing {
+  background-color: #000000 !important;
+  padding-block: 4rem;
+}
+
+.blog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 2rem;
+  margin-top: 1rem;
+}
+
+.card.h-entry,
+.card {
+  background-color: #121214 !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 22px !important;
+  padding: 2rem !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5) !important;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease, box-shadow 0.3s ease !important;
+}
+
+.card.h-entry:hover,
+.card:hover {
+  transform: translateY(-5px) !important;
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8) !important;
+}
+
+.card .card-subtitle,
+.card-subtitle {
+  color: #86868b !important;
+  font-size: 0.85rem !important;
+  font-weight: 500 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.06em !important;
+  margin-bottom: 0.75rem !important;
+}
+
+.card .card-title,
+.card-title h3 a,
+.card-title a {
+  color: #f5f5f7 !important;
+  font-size: 1.5rem !important;
+  font-weight: 700 !important;
+  line-height: 1.25 !important;
+  text-decoration: none !important;
+  transition: color 0.2s ease;
+}
+
+.card-title h3 a:hover,
+.card-title a:hover {
+  color: #2997ff !important;
+}
+
+.card .card-body {
+  color: #a1a1a6 !important;
+  font-size: 1.05rem !important;
+  line-height: 1.55 !important;
+  margin-block: 1rem !important;
+}
+
+.card .card-footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
+  padding-top: 1rem !important;
+  margin-top: 1.25rem !important;
+}
+
+.tags a,
+.label,
+.badge {
+  background: rgba(255, 255, 255, 0.07) !important;
+  color: #d2d2d7 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 980px !important;
+  padding: 0.25rem 0.75rem !important;
+  font-size: 0.8rem !important;
+  font-weight: 500 !important;
+  text-decoration: none !important;
+  display: inline-block;
+  margin-right: 0.4rem;
+  margin-bottom: 0.4rem;
+  transition: all 0.2s ease;
+}
+
+.tags a:hover {
+  background: #2997ff !important;
+  color: #ffffff !important;
+  border-color: #2997ff !important;
+}
+
+/* Footer — Apple Sleek Dark */
+#footer,
+footer {
+  background-color: #000000 !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+  color: #86868b !important;
+  padding: 3rem 1.5rem !important;
+  text-align: center;
+}
+
+#footer a,
+footer a {
+  color: #a1a1a6 !important;
+  text-decoration: none !important;
+}
+
+#footer a:hover,
+footer a:hover {
+  color: #f5f5f7 !important;
+}

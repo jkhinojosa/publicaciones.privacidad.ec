@@ -1,6 +1,10 @@
 ---
-title: Blog de Ingeniería y Publicaciones
-subtitle: Registro de control de versiones (SemVer), auditorías AppSec y arquitectura SaaS de privacidad.ec
+title: Publicaciones y Blog de Ingeniería
+eyebrow: Privacidad
+hero_title: La privacidad es un derecho humano fundamental.
+hero_subtitle: En privacidad.ec, creemos que tus datos personales te pertenecen. Diseñamos arquitectura, plataformas de gobernanza y divulgación técnica con privacidad desde el diseño.
+hero_image: hero.jpg
+hero_style: apple
 content:
     items: '@self.children'
     order:
@@ -11,5 +15,3 @@ content:
 taxonomy:
     category: blog
 ---
-Bienvenido al espacio de ingeniería y divulgación de **privacidad.ec**. Aquí documentamos la evolución técnica, lanzamientos y guías de cumplimiento normativo.
-
