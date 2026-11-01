@@ -12,3 +12,4 @@ taxonomy:
     category: blog
 ---
 Bienvenido al espacio de ingeniería y divulgación de **privacidad.ec**. Aquí documentamos la evolución técnica, lanzamientos y guías de cumplimiento normativo.
+

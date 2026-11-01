@@ -28,3 +28,4 @@ user/accounts/*
 !user/accounts/.gitkeep
 user/data/*
 !user/data/.gitkeep
+

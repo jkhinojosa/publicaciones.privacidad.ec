@@ -31,3 +31,4 @@ Esta iteración presenta la creación y despliegue del **LMS Titular (Academia C
 
 > [!NOTE]
 > **Clasificación SemVer:** Esta iteración se clasifica como **v2.1.0 (Menor)** al enriquecer el ecosistema de privacidad.ec con una nueva aplicación educativa dirigida a los titulares sin alterar la compatibilidad ni los endpoints del GRC o el LMS de DPOs existente.
+

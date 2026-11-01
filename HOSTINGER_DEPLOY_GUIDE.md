@@ -96,3 +96,4 @@ Una vez completado el despliegue automático:
    ```
 2. Grav te solicitará crear el primer **Usuario Administrador** (nombre de usuario, email y contraseña segura).
 3. ¡Listo! Desde allí puedes redactar publicaciones, instalar plugins y gestionar el blog.
+

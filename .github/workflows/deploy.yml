@@ -42,3 +42,4 @@ jobs:
             logs/**
             backup/**
             tmp/**
+
