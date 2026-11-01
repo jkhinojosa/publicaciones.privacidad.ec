@@ -1,0 +1,4 @@
+core:
+  grav:
+    version: 2.2.20
+    schema: 2.2.19_2026-10-31_0

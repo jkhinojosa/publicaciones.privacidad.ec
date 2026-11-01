@@ -1,0 +1,30 @@
+# macOS / OS Files
+.DS_Store
+Thumbs.db
+*.swp
+*.bak
+*~
+
+# IDE
+.idea/
+.vscode/
+
+# Grav Caches & Logs
+/cache/*
+!/cache/.gitkeep
+/logs/*
+!/logs/.gitkeep
+/backup/*
+!/backup/.gitkeep
+/images/*
+!/images/.gitkeep
+/assets/*
+!/assets/.gitkeep
+/tmp/*
+!/tmp/.gitkeep
+
+# Sensitive Admin Accounts
+user/accounts/*
+!user/accounts/.gitkeep
+user/data/*
+!user/data/.gitkeep

@@ -1,0 +1,1293 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * @package    Grav\Common\Flex
+ *
+ * @copyright  Copyright (c) 2015 - 2026 Trilby Media, LLC. All rights reserved.
+ * @license    MIT License; see LICENSE file for details.
+ */
+
+namespace Grav\Common\Flex\Types\Users;
+
+use Closure;
+use Countable;
+use Grav\Common\Config\Config;
+use Grav\Common\Data\Blueprint;
+use Grav\Common\Flex\FlexObject;
+use Grav\Common\Flex\Traits\FlexGravTrait;
+use Grav\Common\Flex\Traits\FlexObjectTrait;
+use Grav\Common\Flex\Types\Users\Traits\UserObjectLegacyTrait;
+use Grav\Common\Grav;
+use Grav\Common\Media\Interfaces\MediaCollectionInterface;
+use Grav\Common\Media\Interfaces\MediaUploadInterface;
+use Grav\Common\Page\Media;
+use Grav\Common\Page\Medium\MediumFactory;
+use Grav\Common\User\Access;
+use Grav\Common\User\Authentication;
+use Grav\Common\Flex\Types\UserGroups\UserGroupCollection;
+use Grav\Common\Flex\Types\UserGroups\UserGroupIndex;
+use Grav\Common\User\Interfaces\UserInterface;
+use Grav\Common\User\Traits\UserTrait;
+use Grav\Common\Utils;
+use Grav\Framework\Contracts\Relationships\ToOneRelationshipInterface;
+use Grav\Framework\File\Formatter\JsonFormatter;
+use Grav\Framework\File\Formatter\YamlFormatter;
+use Grav\Framework\Filesystem\Filesystem;
+use Grav\Framework\Flex\Flex;
+use Grav\Framework\Flex\FlexDirectory;
+use Grav\Framework\Flex\Traits\FlexMediaTrait;
+use Grav\Framework\Flex\Traits\FlexRelationshipsTrait;
+use Grav\Framework\Form\FormFlashFile;
+use Grav\Framework\Media\MediaIdentifier;
+use Grav\Framework\Media\UploadedMediaObject;
+use Psr\Http\Message\UploadedFileInterface;
+use RocketTheme\Toolbox\Event\Event;
+use RocketTheme\Toolbox\File\FileInterface;
+use RocketTheme\Toolbox\ResourceLocator\UniformResourceLocator;
+use RuntimeException;
+use function is_array;
+use function is_bool;
+use function is_object;
+
+/**
+ * Flex User
+ *
+ * Flex User is mostly compatible with the older User class, except on few key areas:
+ *
+ * - Constructor parameters have been changed. Old code creating a new user does not work.
+ * - Serializer has been changed -- existing sessions will be killed.
+ *
+ * @package Grav\Common\User
+ *
+ * @property string $username
+ * @property string $email
+ * @property string $fullname
+ * @property string $state
+ * @property array $groups
+ * @property array $access
+ * @property bool $authenticated
+ * @property bool $authorized
+ */
+class UserObject extends FlexObject implements UserInterface, Countable
+{
+    use FlexGravTrait;
+    use FlexObjectTrait;
+    use FlexMediaTrait {
+        getMedia as private getFlexMedia;
+        getMediaFolder as private getFlexMediaFolder;
+    }
+    use UserTrait;
+    use UserObjectLegacyTrait;
+    use FlexRelationshipsTrait;
+
+    /** @var Closure|null */
+    static public $authorizeCallable;
+    /** @var Closure|null */
+    static public $isAuthorizedCallable;
+
+    /** @var array|null */
+    protected $_uploads_original;
+    /** @var FileInterface|null */
+    protected $_storage;
+    /** @var UserGroupIndex|null */
+    protected $_groups;
+    /** @var Access|null */
+    protected $_access;
+    /** @var array|null */
+    protected $access;
+
+    /**
+     * @return array
+     */
+    public static function getCachedMethods(): array
+    {
+        return [
+            'authorize' => 'session',
+            'load' => false,
+            'find' => false,
+            'remove' => false,
+            'get' => true,
+            'set' => false,
+            'undef' => false,
+            'def' => false,
+        ] + parent::getCachedMethods();
+    }
+
+    /**
+     * UserObject constructor.
+     * @param array $elements
+     * @param string $key
+     * @param FlexDirectory $directory
+     * @param bool $validate
+     */
+    public function __construct(array $elements, $key, FlexDirectory $directory, bool $validate = false)
+    {
+        // User can only be authenticated via login.
+        unset($elements['authenticated'], $elements['authorized']);
+
+        // Define username if it's not set.
+        if (!isset($elements['username'])) {
+            $storageKey = $elements['__META']['storage_key'] ?? null;
+            $storage = $directory->getStorage();
+            if (null !== $storageKey && method_exists($storage, 'normalizeKey') && $key === $storage->normalizeKey($storageKey)) {
+                $elements['username'] = $storageKey;
+            } else {
+                $elements['username'] = $key;
+            }
+        }
+
+        // Define state if it isn't set.
+        if (!isset($elements['state'])) {
+            $elements['state'] = 'enabled';
+        }
+
+        parent::__construct($elements, $key, $directory, $validate);
+    }
+
+    public function __clone()
+    {
+        $this->_access = null;
+        $this->_groups = null;
+
+        parent::__clone();
+    }
+
+    /**
+     * @return void
+     */
+    public function onPrepareRegistration(): void
+    {
+        if (!$this->getProperty('access')) {
+            /** @var Config $config */
+            $config = Grav::instance()['config'];
+
+            $groups = $config->get('plugins.login.user_registration.groups', '');
+            $access = $config->get('plugins.login.user_registration.access', ['site' => ['login' => true]]);
+
+            $this->setProperty('groups', $groups);
+            $this->setProperty('access', $access);
+        }
+    }
+
+    /**
+     * Helper to get content editor will fall back if not set
+     *
+     * @return string
+     */
+    public function getContentEditor(): string
+    {
+        return $this->getProperty('content_editor', 'default');
+    }
+
+    /**
+     * Get value by using dot notation for nested arrays/objects.
+     *
+     * @example $value = $this->get('this.is.my.nested.variable');
+     *
+     * @param string  $name       Dot separated path to the requested value.
+     * @param mixed   $default    Default value (or null).
+     * @param string|null  $separator  Separator, defaults to '.'
+     * @return mixed  Value.
+     */
+    public function get($name, $default = null, $separator = null)
+    {
+        return $this->getNestedProperty($name, $default, $separator);
+    }
+
+    /**
+     * Set value by using dot notation for nested arrays/objects.
+     *
+     * @example $data->set('this.is.my.nested.variable', $value);
+     *
+     * @param string  $name       Dot separated path to the requested value.
+     * @param mixed   $value      New value.
+     * @param string|null  $separator  Separator, defaults to '.'
+     * @return $this
+     */
+    public function set($name, $value, $separator = null)
+    {
+        $this->setNestedProperty($name, $value, $separator);
+
+        return $this;
+    }
+
+    /**
+     * Unset value by using dot notation for nested arrays/objects.
+     *
+     * @example $data->undef('this.is.my.nested.variable');
+     *
+     * @param string  $name       Dot separated path to the requested value.
+     * @param string|null  $separator  Separator, defaults to '.'
+     * @return $this
+     */
+    public function undef($name, $separator = null)
+    {
+        $this->unsetNestedProperty($name, $separator);
+
+        return $this;
+    }
+
+    /**
+     * Set default value by using dot notation for nested arrays/objects.
+     *
+     * @example $data->def('this.is.my.nested.variable', 'default');
+     *
+     * @param string  $name       Dot separated path to the requested value.
+     * @param mixed   $default    Default value (or null).
+     * @param string|null  $separator  Separator, defaults to '.'
+     * @return $this
+     */
+    public function def($name, $default = null, $separator = null)
+    {
+        $this->defNestedProperty($name, $default, $separator);
+
+        return $this;
+    }
+
+    /**
+     * @param UserInterface|null $user
+     * @return bool
+     */
+    public function isMyself(?UserInterface $user = null): bool
+    {
+        if (null === $user) {
+            $user = $this->getActiveUser();
+            if ($user && !$user->authenticated) {
+                $user = null;
+            }
+        }
+
+        return $user && $this->username === $user->username;
+    }
+
+    /**
+     * Checks user authorization to the action.
+     *
+     * @param  string $action
+     * @param  string|null $scope
+     * @return bool|null
+     */
+    public function authorize(string $action, ?string $scope = null): ?bool
+    {
+        if ($scope === 'test') {
+            // Special scope to test the permissions of a user who may not be the
+            // active session user. Account state still applies -- that is a fact
+            // about the account -- but the session facts below (authenticated, 2FA)
+            // do not, because pre-login ACL checks depend on this scope answering
+            // for a user who has not logged in yet. The default keeps a hand-written
+            // account file with no `state:` key from losing every permission.
+            if ($this->getProperty('state', 'enabled') !== 'enabled') {
+                return false;
+            }
+
+            $scope = null;
+        } else {
+            // User needs to be enabled.
+            if ($this->getProperty('state') !== 'enabled') {
+                return false;
+            }
+
+            // User needs to be logged in.
+            if (!$this->getProperty('authenticated')) {
+                return false;
+            }
+
+            // User needs to be authorized (2FA), unless this is a login action itself.
+            // Matched exactly: a substring test also exempted any operator-chosen
+            // permission whose name merely contained "login".
+            if (!in_array($action, static::LOGIN_ACTIONS, true) && !$this->getProperty('authorized')) {
+                return false;
+            }
+
+            // Workaround bug in Login::isUserAuthorizedForPage() <= Login v3.0.4
+            if ((string)(int)$action === $action) {
+                return false;
+            }
+        }
+
+        // Check custom application access.
+        $authorizeCallable = static::$authorizeCallable;
+        if ($authorizeCallable instanceof Closure) {
+            $callable = $authorizeCallable->bindTo($this, $this);
+            $authorized = $callable($action, $scope);
+            if (is_bool($authorized)) {
+                return $authorized;
+            }
+        }
+
+        // Check user access.
+        $access = $this->getAccess();
+        $authorized = $access->authorize($action, $scope);
+        if (is_bool($authorized)) {
+            return $authorized;
+        }
+
+        // Check group access. A rule in the account wins over the groups, and that includes
+        // the super user rule: when the account denies it, a group still grants what it
+        // spells out, but it does not make the user a superuser for everything else.
+        $authorized = $this->getGroups()->authorize($action, $scope, $access->authorize('admin.super') !== false);
+        if (is_bool($authorized)) {
+            return $authorized;
+        }
+
+        // If any specific rule isn't hit, check if user is a superuser.
+        return $access->authorize('admin.super') === true;
+    }
+
+    /**
+     * @param string $property
+     * @param mixed $default
+     * @return mixed
+     */
+    public function getProperty($property, $default = null)
+    {
+        $value = parent::getProperty($property, $default);
+
+        if ($property === 'avatar') {
+            $settings = $this->getMediaFieldSettings($property);
+            $value = $this->parseFileProperty($value, $settings);
+        }
+
+        return $value;
+    }
+
+    /**
+     * @return UserGroupIndex
+     */
+    public function getRoles(): UserGroupIndex
+    {
+        return $this->getGroups();
+    }
+
+    /**
+     * {@inheritdoc}
+     * Override to filter out sensitive fields like password hashes
+     */
+    public function jsonSerialize(): array
+    {
+        $elements = parent::jsonSerialize();
+
+        // Security: Remove sensitive fields that should never be exposed to frontend
+        return array_diff_key($elements, array_flip(static::SECRET_FIELDS));
+    }
+
+    /**
+     * {@inheritdoc}
+     *
+     * Override to keep the same sensitive fields out of forms: a form asks for a value
+     * by field name, and the fields of a Flex form can be written in page frontmatter.
+     */
+    public function getFormValue(string $name, $default = null, ?string $separator = null)
+    {
+        // Security: Sensitive fields are not form values, a field named after one stays empty
+        if (in_array(explode($separator ?: '.', $name, 2)[0], static::SECRET_FIELDS, true)) {
+            return $default;
+        }
+
+        return parent::getFormValue($name, $default, $separator);
+    }
+
+    /**
+     * Convert object into an array.
+     *
+     * @return array
+     */
+    public function toArray()
+    {
+        $array = $this->jsonSerialize();
+
+        $settings = $this->getMediaFieldSettings('avatar');
+        $array['avatar'] = $this->parseFileProperty($array['avatar'] ?? null, $settings);
+
+        return $array;
+    }
+
+    /**
+     * Convert object into YAML string.
+     *
+     * @param  int $inline  The level where you switch to inline YAML.
+     * @param  int $indent  The amount of spaces to use for indentation of nested nodes.
+     * @return string A YAML string representing the object.
+     */
+    public function toYaml($inline = 5, $indent = 2)
+    {
+        $yaml = new YamlFormatter(['inline' => $inline, 'indent' => $indent]);
+
+        return $yaml->encode($this->toArray());
+    }
+
+    /**
+     * Convert object into JSON string.
+     *
+     * @return string
+     */
+    public function toJson()
+    {
+        $json = new JsonFormatter();
+
+        return $json->encode($this->toArray());
+    }
+
+    /**
+     * Join nested values together by using blueprints.
+     *
+     * @param string  $name       Dot separated path to the requested value.
+     * @param mixed   $value      Value to be joined.
+     * @param string|null  $separator  Separator, defaults to '.'
+     * @return $this
+     * @throws RuntimeException
+     */
+    public function join($name, $value, $separator = null)
+    {
+        $separator ??= '.';
+        $old = $this->get($name, null, $separator);
+        if ($old !== null) {
+            if (!is_array($old)) {
+                throw new RuntimeException('Value ' . $old);
+            }
+
+            if (is_object($value)) {
+                $value = (array) $value;
+            } elseif (!is_array($value)) {
+                throw new RuntimeException('Value ' . $value);
+            }
+
+            $value = $this->getBlueprint()->mergeData($old, $value, $name, $separator);
+        }
+
+        $this->set($name, $value, $separator);
+
+        return $this;
+    }
+
+    /**
+     * Get nested structure containing default values defined in the blueprints.
+     *
+     * Fields without default value are ignored in the list.
+
+     * @return array
+     */
+    public function getDefaults()
+    {
+        return $this->getBlueprint()->getDefaults();
+    }
+
+    /**
+     * Set default values by using blueprints.
+     *
+     * @param string  $name       Dot separated path to the requested value.
+     * @param mixed   $value      Value to be joined.
+     * @param string|null  $separator  Separator, defaults to '.'
+     * @return $this
+     */
+    public function joinDefaults($name, $value, $separator = null)
+    {
+        if (is_object($value)) {
+            $value = (array) $value;
+        }
+
+        $old = $this->get($name, null, $separator);
+        if ($old !== null) {
+            $value = $this->getBlueprint()->mergeData($value, $old, $name, $separator ?? '.');
+        }
+
+        $this->setNestedProperty($name, $value, $separator);
+
+        return $this;
+    }
+
+    /**
+     * Get value from the configuration and join it with given data.
+     *
+     * @param string  $name       Dot separated path to the requested value.
+     * @param array|object $value Value to be joined.
+     * @param string  $separator  Separator, defaults to '.'
+     * @return array
+     * @throws RuntimeException
+     */
+    public function getJoined($name, $value, $separator = null)
+    {
+        if (is_object($value)) {
+            $value = (array) $value;
+        } elseif (!is_array($value)) {
+            throw new RuntimeException('Value ' . $value);
+        }
+
+        $old = $this->get($name, null, $separator);
+
+        if ($old === null) {
+            // No value set; no need to join data.
+            return $value;
+        }
+
+        if (!is_array($old)) {
+            throw new RuntimeException('Value ' . $old);
+        }
+
+        // Return joined data.
+        return $this->getBlueprint()->mergeData($old, $value, $name, $separator ?? '.');
+    }
+
+    /**
+     * Set default values to the configuration if variables were not set.
+     *
+     * @param array $data
+     * @return $this
+     */
+    public function setDefaults(array $data)
+    {
+        $this->setElements($this->getBlueprint()->mergeData($data, $this->toArray()));
+
+        return $this;
+    }
+
+    /**
+     * Validate by blueprints.
+     *
+     * @return $this
+     * @throws \Exception
+     */
+    public function validate()
+    {
+        $this->getBlueprint()->validate($this->toArray());
+
+        return $this;
+    }
+
+    /**
+     * Filter all items by using blueprints.
+     * @return $this
+     */
+    public function filter()
+    {
+        $this->setElements($this->getBlueprint()->filter($this->toArray()));
+
+        return $this;
+    }
+
+    /**
+     * Get extra items which haven't been defined in blueprints.
+     *
+     * @return array
+     */
+    public function extra()
+    {
+        return $this->getBlueprint()->extra($this->toArray());
+    }
+
+    /**
+     * Return unmodified data as raw string.
+     *
+     * NOTE: This function only returns data which has been saved to the storage.
+     *
+     * @return string
+     */
+    public function raw()
+    {
+        $file = $this->file();
+
+        return $file ? $file->raw() : '';
+    }
+
+    /**
+     * Set or get the data storage.
+     *
+     * @param FileInterface|null $storage Optionally enter a new storage.
+     * @return FileInterface|null
+     */
+    public function file(?FileInterface $storage = null)
+    {
+        if (null !== $storage) {
+            $this->_storage = $storage;
+        }
+
+        return $this->_storage;
+    }
+
+    /**
+     * @return bool
+     */
+    public function isValid(): bool
+    {
+        return $this->getProperty('state') !== null;
+    }
+
+    /**
+     * Save user
+     *
+     * @return static
+     */
+    public function save()
+    {
+        // TODO: We may want to handle this in the storage layer in the future.
+        $key = $this->getStorageKey();
+        // `@@` is Flex's marker for an in-memory (not-yet-persisted) storage key.
+        // `str_contains` is the correct predicate here — `strpos` returns 0 when
+        // the marker is at position 0 (e.g. `@@hash`), which is falsy and would
+        // have skipped the uniqueness check below.
+        $isNewUser = $key === '' || str_contains($key, '@@');
+
+        if ($isNewUser) {
+            $this->setStorageKey($this->getKey());
+        }
+
+        // Prevent overwriting an existing account when a new user is created with
+        // an already-taken username, or an account is renamed to one. Checked
+        // against the record the storage is going to write rather than the object
+        // key, and outside of the branch above: a Flex form creates the object with
+        // an empty key and takes both the username and, if submitted, `storage_key`
+        // from the form data. Applies to every storage implementation.
+        if ($this->isUsernameTaken()) {
+            throw new RuntimeException('User account with this username already exists');
+        }
+
+        $password = $this->getProperty('password') ?? $this->getProperty('password1');
+        if (null !== $password && '' !== $password) {
+            $password2 = $this->getProperty('password2');
+            if (!\is_string($password) || ($password2 && $password !== $password2)) {
+                throw new \RuntimeException('Passwords did not match.');
+            }
+
+            $this->setProperty('hashed_password', Authentication::create($password));
+        }
+        $this->unsetProperty('password');
+        $this->unsetProperty('password1');
+        $this->unsetProperty('password2');
+
+        // Backwards compatibility with older plugins.
+        $fireEvents = $this->isAdminSite() && $this->getFlexDirectory()->getConfig('object.compat.events', true);
+        $grav = $this->getContainer();
+        if ($fireEvents) {
+            $self = $this;
+            $grav->fireEvent('onAdminSave', new Event(['type' => 'flex', 'directory' => $this->getFlexDirectory(), 'object' => &$self]));
+            if ($self !== $this) {
+                throw new RuntimeException('Switching Flex User object during onAdminSave event is not supported! Please update plugin.');
+            }
+        }
+
+        try {
+            $instance = parent::save();
+        } catch (RuntimeException $e) {
+            if ($e->getCode() === 409) {
+                // The account has changed since this object was loaded. The object may have come from the object
+                // cache, which does not see two changes made within the same second: read the storage next time.
+                $this->getFlexDirectory()->getCache('object')->clear();
+            }
+
+            throw $e;
+        }
+
+        // Backwards compatibility with older plugins.
+        if ($fireEvents) {
+            $grav->fireEvent('onAdminAfterSave', new Event(['type' => 'flex', 'directory' => $this->getFlexDirectory(), 'object' => $this]));
+        }
+
+        return $instance;
+    }
+
+    /**
+     * Compare a later save against the stored account $stored was loaded from, as if this object had been
+     * loaded from it too. Used when the session's copy of the account is refreshed from the stored account.
+     *
+     * @param UserObject $stored
+     * @return void
+     * @internal
+     */
+    public function setLoadedFrom(UserObject $stored): void
+    {
+        $meta = $this->getMetaData();
+        $meta['account_checksum'] = $stored->getMetaData()['account_checksum'] ?? null;
+        $this->setMetaData($meta);
+    }
+
+    /**
+     * @return array
+     */
+    public function prepareStorage(): array
+    {
+        $elements = parent::prepareStorage();
+
+        // Do not save authorization information.
+        unset($elements['authenticated'], $elements['authorized']);
+
+        return $elements;
+    }
+
+    /**
+     * @return MediaCollectionInterface
+     */
+    public function getMedia()
+    {
+        /** @var Media $media */
+        $media = $this->getFlexMedia();
+
+        // Deal with shared avatar folder.
+        $path = $this->getAvatarFile();
+        if ($path && !$media[$path] && is_file($path)) {
+            $medium = MediumFactory::fromFile($path);
+            if ($medium) {
+                $media->add($path, $medium);
+                $name = Utils::basename($path);
+                if ($name !== $path) {
+                    $media->add($name, $medium);
+                }
+            }
+        }
+
+        return $media;
+    }
+
+    /**
+     * @return string|null
+     */
+    public function getMediaFolder(): ?string
+    {
+        $folder = $this->getFlexMediaFolder();
+
+        // Check for shared media
+        if (!$folder && !$this->getFlexDirectory()->getMediaFolder()) {
+            $this->_loadMedia = false;
+            $folder = $this->getBlueprint()->fields()['avatar']['destination'] ?? 'account://avatars';
+        }
+
+        return $folder;
+    }
+
+    /**
+     * @param string $name
+     * @return array|object|null
+     * @internal
+     */
+    public function initRelationship(string $name)
+    {
+        switch ($name) {
+            case 'media':
+                $list = [];
+                foreach ($this->getMedia()->all() as $filename => $object) {
+                    $list[] = $this->buildMediaObject(null, $filename, $object);
+                }
+
+                return $list;
+            case 'avatar':
+                return $this->buildMediaObject('avatar', basename($this->getAvatarUrl()), $this->getAvatarImage());
+        }
+
+        throw new \InvalidArgumentException(sprintf('%s: Relationship %s does not exist', $this->getFlexType(), $name));
+    }
+
+    /**
+     * @return bool Return true if relationships were updated.
+     */
+    protected function updateRelationships(): bool
+    {
+        $modified = $this->getRelationships()->getModified();
+        if ($modified) {
+            foreach ($modified as $relationship) {
+                $name = $relationship->getName();
+                switch ($name) {
+                    case 'avatar':
+                        \assert($relationship instanceof ToOneRelationshipInterface);
+                        $this->updateAvatarRelationship($relationship);
+                        break;
+                    default:
+                        throw new \InvalidArgumentException(sprintf('%s: Relationship %s cannot be modified', $this->getFlexType(), $name), 400);
+                }
+            }
+
+            $this->resetRelationships();
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param ToOneRelationshipInterface $relationship
+     */
+    protected function updateAvatarRelationship(ToOneRelationshipInterface $relationship): void
+    {
+        $files = [];
+        $avatar = $this->getAvatarImage();
+        if ($avatar) {
+            $files['avatar'][$avatar->filename] = null;
+        }
+
+        $identifier = $relationship->getIdentifier();
+        if ($identifier) {
+            \assert($identifier instanceof MediaIdentifier);
+            $object = $identifier->getObject();
+            if ($object instanceof UploadedMediaObject) {
+                $uploadedFile = $object->getUploadedFile();
+                if ($uploadedFile) {
+                    $files['avatar'][$uploadedFile->getClientFilename()] = $uploadedFile;
+                }
+            }
+        }
+
+        $this->update([], $files);
+    }
+
+    /**
+     * @param string $name
+     * @return Blueprint
+     */
+    protected function doGetBlueprint(string $name = ''): Blueprint
+    {
+        $blueprint = $this->getFlexDirectory()->getBlueprint($name ? '.' . $name : $name);
+
+        // HACK: With folder storage we need to ignore the avatar destination.
+        if ($this->getFlexDirectory()->getMediaFolder()) {
+            $field = $blueprint->get('form/fields/avatar');
+            if ($field) {
+                unset($field['destination']);
+                $blueprint->set('form/fields/avatar', $field);
+            }
+        }
+
+        return $blueprint;
+    }
+
+    /**
+     * @param UserInterface $user
+     * @param string $action
+     * @param string $scope
+     * @param bool $isMe
+     * @return bool|null
+     */
+    protected function isAuthorizedOverride(UserInterface $user, string $action, string $scope, bool $isMe = false): ?bool
+    {
+        // Check custom application access.
+        $isAuthorizedCallable = static::$isAuthorizedCallable;
+        if ($isAuthorizedCallable instanceof Closure) {
+            $callable = $isAuthorizedCallable->bindTo($this, $this);
+            $authorized = $callable($user, $action, $scope, $isMe);
+            if (is_bool($authorized)) {
+                return $authorized;
+            }
+        }
+
+        // Both keys have to be non-empty. FlexObject::getStorageKey() returns '' for
+        // any object that has never been persisted, and the anonymous guest Grav
+        // hands a session-less visitor is itself created with an empty key -- so a
+        // bare comparison made a guest the "owner" of any not-yet-created account.
+        // (GHSA-hp5c-hmwq-qjv6)
+        $key = $this->getStorageKey();
+        if ($key !== '' && $user instanceof self && $user->getStorageKey() === $key) {
+            // This rule answers without calling authorize(), so it has to hold the same
+            // preconditions. After the password step of a 2FA login the session already
+            // carries this account's user object, but the login is not complete until
+            // the second factor has been given. State is read from the stored account as
+            // well: the session's copy may predate the account being disabled.
+            if ($this->getProperty('state', 'enabled') !== 'enabled' || $user->getProperty('state', 'enabled') !== 'enabled') {
+                return false;
+            }
+
+            // As in authorize(), the session facts (logged in, past 2FA) apply to the
+            // session user only; a user passed in explicitly is tested as-is.
+            if ($isMe && (!$user->getProperty('authenticated') || !$user->getProperty('authorized'))) {
+                return false;
+            }
+
+            // User cannot delete his own account, otherwise he has full access.
+            return $action !== 'delete';
+        }
+
+        // Managing user accounts does not reach the super-admin tier: an account that
+        // is not super itself may not create, update or delete one that is, whatever
+        // rule grants it user management. Otherwise it could reset the super-admin's
+        // password and sign in as them. The API, the classic admin and the generic
+        // Flex API all hold this line; this is the same guard for Flex form saves.
+        if (in_array($action, ['create', 'update', 'delete'], true)
+            && $this->hasSuperAccess()
+            && !$this->actorHasSuperAccess($user, $isMe)
+        ) {
+            return false;
+        }
+
+        return parent::isAuthorizedOverride($user, $action, $scope, $isMe);
+    }
+
+    /**
+     * Whether this account holds super-admin access, through its own access map or
+     * through any of its groups. Read straight from the ACL, not through
+     * authorize(), so it answers for an account loaded from storage whatever its
+     * session or account state.
+     *
+     * Every group is asked on its own, with the `test` scope. The combined answer of
+     * UserGroupCollection::authorize() lets a deny in one group cancel the grant of
+     * another and skips disabled groups, but regular accounts and the API are super as
+     * soon as one group says so, and a disabled group can be enabled again.
+     *
+     * @return bool
+     */
+    protected function hasSuperAccess(): bool
+    {
+        $access = $this->getAccess();
+        $groups = $this->getGroups();
+        foreach (['admin.super', 'api.super'] as $rule) {
+            if ($access->authorize($rule) === true) {
+                return true;
+            }
+
+            foreach ($groups as $group) {
+                if ($group->authorize($rule, 'test') === true) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param UserInterface $user
+     * @param bool $isMe
+     * @return bool
+     */
+    protected function actorHasSuperAccess(UserInterface $user, bool $isMe): bool
+    {
+        $scope = $isMe ? null : 'test';
+
+        return $user->authorize('admin.super', $scope) === true
+            || $user->authorize('api.super', $scope) === true;
+    }
+
+    /**
+     * Whether saving this object would land on another account: on its record in
+     * the storage, or on its username in the index.
+     *
+     * The object key does not answer that. It is the username when the object comes
+     * from $grav['accounts']->load(), but a Flex form creates the object with an
+     * empty key and fills `username` from the submission -- and the storage names
+     * the record after its key field (`username` in file storage) whenever the row
+     * has one, not after the key it was handed. So look at the key the storage is
+     * going to write, and compare it with the record this object was loaded from.
+     *
+     * @return bool
+     */
+    protected function isUsernameTaken(): bool
+    {
+        $directory = $this->getFlexDirectory();
+        $storage = $directory->getStorage();
+        $normalize = static fn($key): string => method_exists($storage, 'normalizeKey') ? $storage->normalizeKey((string)$key) : (string)$key;
+
+        // The record this object was loaded from comes from the meta data, as
+        // `storage_key` is a property which can be set from the outside.
+        $oldKey = (string)($this->getMetaData()['storage_key'] ?? '');
+
+        // getElement() reads what goes into the row. getProperty('storage_key')
+        // would lazy load the property first, losing the key set by setStorageKey().
+        $newKey = $normalize($this->getElement($storage->getKeyField()) ?? $this->getStorageKey());
+        if ($newKey !== '' && $newKey !== $normalize($oldKey) && $storage->hasKey($newKey)) {
+            return true;
+        }
+
+        // Folder storage does not have the username in its key, but accounts are still
+        // looked up by it: a second record with the same username would shadow the
+        // first one. The index can be stale, so make sure the record is still there.
+        $owner = (string)($directory->getIndex()->getMetaData($normalize($this->getElement('username')))['storage_key'] ?? '');
+
+        return $owner !== '' && $normalize($owner) !== $normalize($oldKey) && $storage->hasKey($owner);
+    }
+
+    /**
+     * {@inheritdoc}
+     *
+     * The password hash and the session flags are never taken from submitted data.
+     * The account blueprint does not declare them, and its loose validation passes
+     * undeclared keys through, so a form save could otherwise write a hash of the
+     * submitter's choosing. A new password goes through `password`, which save()
+     * hashes. Neither is the storage key: it says which account this object is,
+     * both to save() and to the own-account rule in isAuthorizedOverride().
+     */
+    public function update(array $data, array $files = [])
+    {
+        unset($data['hashed_password'], $data['authenticated'], $data['authorized'], $data['storage_key']);
+
+        return parent::update($data, $files);
+    }
+
+    /**
+     * @return string|null
+     */
+    protected function getAvatarFile(): ?string
+    {
+        $avatars = $this->getElement('avatar');
+        if (is_array($avatars) && $avatars) {
+            $avatar = array_shift($avatars);
+
+            return $avatar['path'] ?? null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Gets the associated media collection (original images).
+     *
+     * @return MediaCollectionInterface  Representation of associated media.
+     */
+    protected function getOriginalMedia()
+    {
+        $folder = $this->getMediaFolder();
+        if ($folder) {
+            $folder .= '/original';
+        }
+
+        return (new Media($folder ?? '', $this->getMediaOrder()))->setTimestamps();
+    }
+
+    /**
+     * @param array $files
+     * @return void
+     */
+    protected function setUpdatedMedia(array $files): void
+    {
+        /** @var UniformResourceLocator $locator */
+        $locator = Grav::instance()['locator'];
+
+        $media = $this->getMedia();
+        if (!$media instanceof MediaUploadInterface) {
+            return;
+        }
+
+        $filesystem = Filesystem::getInstance(false);
+
+        $list = [];
+        $list_original = [];
+        foreach ($files as $field => $group) {
+            // Ignore files without a field.
+            if ($field === '') {
+                continue;
+            }
+            $field = (string)$field;
+
+            // Load settings for the field.
+            $settings = $this->getMediaFieldSettings($field);
+
+            // Files are not filtered by the blueprint like form data: skip fields which are disabled or
+            // ignored (e.g. guarded by `security@`).
+            if (!empty($settings['disabled']) || !empty($settings['validate']['ignore'])) {
+                continue;
+            }
+
+            foreach ($group as $filename => $file) {
+                if ($file) {
+                    // File upload.
+                    $filename = $file->getClientFilename();
+
+                    /** @var FormFlashFile $file */
+                    $data = $file->jsonSerialize();
+                    unset($data['tmp_name'], $data['path']);
+                } else {
+                    // File delete.
+                    $data = null;
+                }
+
+                if ($file) {
+                    // Check file upload against media limits (except for max size).
+                    $filename = $media->checkUploadedFile($file, $filename, ['filesize' => 0] + $settings);
+                } else {
+                    // The name of a deleted file has to be a plain filename, like an upload: deleteFile()
+                    // follows sub-folders (`original/` is added when saving).
+                    $filename = (string)$filename;
+                    if (!Utils::checkFilename($filename)) {
+                        throw new RuntimeException('File could not be deleted: Bad filename', 400);
+                    }
+                }
+
+                $self = $settings['self'];
+                if ($this->_loadMedia && $self) {
+                    $filepath = $filename;
+                } else {
+                    $filepath = "{$settings['destination']}/{$filename}";
+
+                    // For backwards compatibility we are always using relative path from the installation root.
+                    if ($locator->isStream($filepath)) {
+                        $filepath = $locator->findResource($filepath, false, true);
+                    }
+                }
+
+                // Special handling for original images.
+                if (strpos($field, '/original')) {
+                    if ($this->_loadMedia && $self) {
+                        $list_original[$filename] = [$file, $settings];
+                    }
+                    continue;
+                }
+
+                // Calculate path without the retina scaling factor.
+                $realpath = $filesystem->pathname($filepath) . str_replace(['@3x', '@2x'], '', Utils::basename($filepath));
+
+                $list[$filename] = [$file, $settings];
+
+                // Only media fields keep a file list in the object; other field names are not object properties.
+                if (empty($settings['media_field'])) {
+                    continue;
+                }
+
+                $path = str_replace('.', "\n", $field);
+                if (null !== $data) {
+                    $data['name'] = $filename;
+                    $data['path'] = $filepath;
+
+                    $this->setNestedProperty("{$path}\n{$realpath}", $data, "\n");
+                } else {
+                    $this->unsetNestedProperty("{$path}\n{$realpath}", "\n");
+                }
+            }
+        }
+
+        $this->clearMediaCache();
+
+        $this->_uploads = $list;
+        $this->_uploads_original = $list_original;
+    }
+
+    protected function saveUpdatedMedia(): void
+    {
+        $media = $this->getMedia();
+        if (!$media instanceof MediaUploadInterface) {
+            throw new RuntimeException('Internal error UO101');
+        }
+
+        // Upload/delete original sized images.
+        /**
+         * @var string $filename
+         * @var UploadedFileInterface|array|null $file
+         */
+        foreach ($this->_uploads_original ?? [] as $filename => $file) {
+            $filename = 'original/' . $filename;
+            if (is_array($file)) {
+                [$file, $settings] = $file;
+            } else {
+                $settings = null;
+            }
+            if ($file instanceof UploadedFileInterface) {
+                $media->copyUploadedFile($file, $filename, $settings);
+            } else {
+                $media->deleteFile($filename, $settings);
+            }
+        }
+
+        // Upload/delete altered files.
+        /**
+         * @var string $filename
+         * @var UploadedFileInterface|array|null $file
+         */
+        foreach ($this->getUpdatedMedia() as $filename => $file) {
+            if (is_array($file)) {
+                [$file, $settings] = $file;
+            } else {
+                $settings = null;
+            }
+            if ($file instanceof UploadedFileInterface) {
+                $media->copyUploadedFile($file, $filename, $settings);
+            } else {
+                $media->deleteFile($filename, $settings);
+            }
+        }
+
+        $this->setUpdatedMedia([]);
+        $this->clearMediaCache();
+    }
+
+    /**
+     * Override doSerialize to preserve sensitive fields during PHP serialization (caching).
+     *
+     * Note: jsonSerialize() and toArray() strip sensitive fields for frontend security,
+     * but we need to preserve them when serializing for cache storage to ensure
+     * password hashes and 2FA secrets are not lost.
+     *
+     * @return array
+     */
+    protected function doSerialize(): array
+    {
+        return [
+            'type' => $this->getFlexType(),
+            'key' => $this->getKey(),
+            'elements' => $this->getElements(),
+            'storage' => $this->getMetaData()
+        ];
+    }
+
+    /**
+     * @return UserGroupIndex
+     */
+    protected function getUserGroups()
+    {
+        $grav = Grav::instance();
+
+        /** @var Flex $flex */
+        $flex = $grav['flex'];
+
+        /** @var UserGroupCollection|null $groups */
+        $groups = $flex->getDirectory('user-groups');
+        if ($groups) {
+            /** @var UserGroupIndex $index */
+            $index = $groups->getIndex();
+
+            return $index;
+        }
+
+        return $grav['user_groups'];
+    }
+
+    /**
+     * @return UserGroupIndex
+     */
+    protected function getGroups()
+    {
+        if (null === $this->_groups) {
+            /** @var UserGroupIndex $groups */
+            $groups = $this->getUserGroups()->select((array)$this->getProperty('groups'));
+            $this->_groups = $groups;
+        }
+
+        return $this->_groups;
+    }
+
+    /**
+     * @return Access
+     */
+    protected function getAccess(): Access
+    {
+        if (null === $this->_access) {
+            $this->_access = new Access($this->getProperty('access'));
+        }
+
+        return $this->_access;
+    }
+
+    /**
+     * @return array
+     */
+    protected function offsetLoad_access(mixed $value): array
+    {
+        if (!$value instanceof Access) {
+            $value = new Access($value);
+        }
+
+        return $value->jsonSerialize();
+    }
+
+    /**
+     * @return array
+     */
+    protected function offsetPrepare_access(mixed $value): array
+    {
+        return $this->offsetLoad_access($value);
+    }
+
+    /**
+     * @param array|null $value
+     * @return array|null
+     */
+    protected function offsetSerialize_access(?array $value): ?array
+    {
+        return $value;
+    }
+}

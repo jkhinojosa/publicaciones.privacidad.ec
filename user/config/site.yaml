@@ -1,0 +1,14 @@
+title: 'privacidad.ec — Blog y Publicaciones'
+default_lang: es
+author:
+  name: 'privacidad.ec Team'
+  email: 'contacto@privacidad.ec'
+taxonomies: [category, tag]
+metadata:
+  description: 'Blog de Ingeniería, publicaciones técnicas, changelog y actualizaciones de privacidad.ec'
+summary:
+  enabled: true
+  format: short
+  size: 300
+routes:
+  default: '/blog'

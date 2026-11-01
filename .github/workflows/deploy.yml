@@ -1,0 +1,44 @@
+name: Deploy Grav Blog to Hostinger
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  web-deploy:
+    name: 🎉 Deploy to Hostinger
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🚚 Get latest code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: 📂 Sync files via FTPS to Hostinger
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.HOSTINGER_FTP_SERVER }}
+          username: ${{ secrets.HOSTINGER_FTP_USERNAME }}
+          password: ${{ secrets.HOSTINGER_FTP_PASSWORD }}
+          port: 21
+          protocol: ftps
+          local-dir: ./
+          server-dir: ${{ secrets.HOSTINGER_TARGET_DIR || 'public_html/publicaciones/' }}
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            .env.example
+            README.md
+            CONTRIBUTING.md
+            CHANGELOG.md
+            CODE_OF_CONDUCT.md
+            SECURITY.md
+            now.json
+            composer.json
+            composer.lock
+            cache/**
+            logs/**
+            backup/**
+            tmp/**

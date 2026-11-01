@@ -1,0 +1,246 @@
+<?php
+
+/**
+ * @package    Grav\Common\Twig\Sandbox
+ *
+ * @copyright  Copyright (c) 2015 - 2026 Trilby Media, LLC. All rights reserved.
+ * @license    MIT License; see LICENSE file for details.
+ */
+
+namespace Grav\Common\Twig\Sandbox;
+
+use ArrayAccess;
+use Grav\Common\Config\Config;
+use function in_array;
+use function is_array;
+use function str_replace;
+use function str_starts_with;
+
+/**
+ * Read-only filtered facade around Grav\Common\Config\Config injected as the
+ * `config` Twig variable inside sandboxed renders (editor-authored page
+ * content via `@Page:` and string templates via `@Var:`).
+ *
+ * Trusted theme/plugin/modular templates are NOT sandboxed (see
+ * GravSourcePolicy) and continue to receive the unfiltered Config — they
+ * keep full access to plugins.*, streams.*, and any other configuration.
+ *
+ * Denied paths are dot-notation prefixes; any read whose normalized path
+ * equals or starts with a denied prefix is treated as missing:
+ * `get`/`value` return the supplied default, `offsetExists` returns false,
+ * and `toArray` recursively removes the matching subtrees.
+ *
+ * The active theme's settings are in the tree twice, as `themes.<name>` and as
+ * `theme`; a path denied under one of the two names is denied under both.
+ *
+ * Defense-in-depth: this class is the only Config-shape object whose
+ * `toarray` is allow-listed in the sandbox. The raw Config and Data
+ * sandbox entries have `toarray` removed (system/config/security.yaml),
+ * so the bulk-dump method is gated even if a real Config leaks into a
+ * sandboxed render via another path (e.g. `grav['config']`).
+ */
+final class SandboxConfig implements ArrayAccess
+{
+    /** @var list<string> */
+    private array $denied;
+
+    /**
+     * @param Config $config
+     * @param iterable<string> $deniedPaths Dot-notation prefixes to redact.
+     */
+    public function __construct(
+        private readonly Config $config,
+        iterable $deniedPaths = []
+    ) {
+        $denied = [];
+        foreach ($deniedPaths as $path) {
+            $path = trim((string) $path, " \t.");
+            if ($path === '' || in_array($path, $denied, true)) {
+                continue;
+            }
+            $denied[] = $path;
+        }
+        $this->denied = $this->withThemeAliases($denied);
+    }
+
+    /**
+     * Themes::load() copies the active theme's settings from where they are
+     * stored, `themes.<name>`, to `theme`, so every one of them can be read by
+     * two paths. Add the other name of each denied path in either tree, or
+     * the value it is meant to hide stays readable there.
+     *
+     * @param list<string> $denied
+     * @return list<string>
+     */
+    private function withThemeAliases(array $denied): array
+    {
+        $name = (string) $this->config->get('system.pages.theme');
+        if ($name === '') {
+            return $denied;
+        }
+
+        $stored = 'themes.' . $name;
+        foreach ($denied as $path) {
+            if ($path === 'themes' || $path === $stored) {
+                $alias = 'theme';
+            } elseif (str_starts_with($path, $stored . '.')) {
+                $alias = 'theme' . substr($path, strlen($stored));
+            } elseif ($path === 'theme' || str_starts_with($path, 'theme.')) {
+                $alias = $stored . substr($path, strlen('theme'));
+            } else {
+                continue;
+            }
+            if (!in_array($alias, $denied, true)) {
+                $denied[] = $alias;
+            }
+        }
+
+        return $denied;
+    }
+
+    /**
+     * Dot-notation read with denied-prefix filtering.
+     *
+     * Reading at or above a denied prefix (e.g. `get('')` for the whole tree
+     * or `get('plugins')` when `plugins` is denied) returns the default;
+     * reading from inside a non-denied subtree that contains denied
+     * descendants (e.g. the root tree) returns the array with denied
+     * subtrees removed.
+     */
+    public function get(string $name, mixed $default = null, string $separator = '.'): mixed
+    {
+        // Config::get() splits on `$separator ?: '.'`, so every falsy separator
+        // ('' and '0') means '.' there. Resolve it once, up front, so the path
+        // that is checked is the path that is read.
+        $separator = $separator ?: '.';
+
+        $path = $this->normalize($name, $separator);
+        if ($this->isDenied($path)) {
+            return $default;
+        }
+
+        $value = $this->config->get($name, $default, $separator);
+
+        if (is_array($value) && $this->hasDeniedDescendantsOf($path)) {
+            $value = $this->filterArray($value, $path);
+        }
+
+        return $value;
+    }
+
+    public function value(string $name, mixed $default = null, string $separator = '.'): mixed
+    {
+        return $this->get($name, $default, $separator);
+    }
+
+    /**
+     * Full configuration tree with denied subtrees removed.
+     */
+    public function toArray(): array
+    {
+        return $this->filterArray($this->config->toArray(), '');
+    }
+
+    public function offsetExists(mixed $offset): bool
+    {
+        $key = $this->normalize((string) $offset, '.');
+        if ($this->isDenied($key)) {
+            return false;
+        }
+        return $this->config->offsetExists($offset);
+    }
+
+    public function offsetGet(mixed $offset): mixed
+    {
+        $key = $this->normalize((string) $offset, '.');
+        if ($this->isDenied($key)) {
+            return null;
+        }
+
+        $value = $this->config->offsetGet($offset);
+        if (is_array($value) && $this->hasDeniedDescendantsOf($key)) {
+            $value = $this->filterArray($value, $key);
+        }
+        return $value;
+    }
+
+    /**
+     * Read-only facade. Sandbox already blocks set on the security-policy
+     * layer; this is a no-op so an accidental call from non-sandboxed code
+     * cannot mutate the underlying Config.
+     */
+    public function offsetSet(mixed $offset, mixed $value): void
+    {
+    }
+
+    public function offsetUnset(mixed $offset): void
+    {
+    }
+
+    private function normalize(string $name, string $separator): string
+    {
+        $name = trim($name, " \t.");
+        if ($separator !== '.' && $separator !== '') {
+            $name = str_replace($separator, '.', $name);
+        }
+        return $name;
+    }
+
+    /**
+     * True when $path equals a denied prefix or is a descendant of one.
+     */
+    private function isDenied(string $path): bool
+    {
+        if ($path === '') {
+            return false;
+        }
+        $needle = $path . '.';
+        foreach ($this->denied as $denied) {
+            $haystack = $denied . '.';
+            if ($haystack === $needle || str_starts_with($needle, $haystack)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * True when any denied path lives inside the subtree rooted at $prefix
+     * (i.e. reading $prefix returns an array that still contains denied
+     * keys and needs filtering).
+     */
+    private function hasDeniedDescendantsOf(string $prefix): bool
+    {
+        if ($prefix === '') {
+            return $this->denied !== [];
+        }
+        $haystack = $prefix . '.';
+        foreach ($this->denied as $denied) {
+            if (str_starts_with($denied . '.', $haystack)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Walk $tree, anchored at $rootPath inside the full config, and remove
+     * every key that get() would refuse by name. The keys are tested against
+     * the denied list rather than the denied paths being split and looked up,
+     * because a key may itself contain a dot: user/config/plugins.bak/email.yaml
+     * loads as the single key 'plugins.bak', which no split path ever reaches.
+     */
+    private function filterArray(array $tree, string $rootPath): array
+    {
+        foreach ($tree as $key => $value) {
+            $path = $this->normalize($rootPath === '' ? (string) $key : $rootPath . '.' . $key, '.');
+            // A key that normalizes to nothing cannot be named by a denied path.
+            if ($path === '' || $this->isDenied($path)) {
+                unset($tree[$key]);
+            } elseif (is_array($value) && $this->hasDeniedDescendantsOf($path)) {
+                $tree[$key] = $this->filterArray($value, $path);
+            }
+        }
+        return $tree;
+    }
+}

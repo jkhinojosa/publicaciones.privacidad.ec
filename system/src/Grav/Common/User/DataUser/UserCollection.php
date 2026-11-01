@@ -1,0 +1,190 @@
+<?php
+
+/**
+ * @package    Grav\Common\User
+ *
+ * @copyright  Copyright (c) 2015 - 2026 Trilby Media, LLC. All rights reserved.
+ * @license    MIT License; see LICENSE file for details.
+ */
+
+namespace Grav\Common\User\DataUser;
+
+use Grav\Common\Data\Blueprints;
+use Grav\Common\File\CompiledYamlFile;
+use Grav\Common\Grav;
+use Grav\Common\User\Interfaces\UserCollectionInterface;
+use Grav\Common\User\Interfaces\UserInterface;
+use Grav\Common\Utils;
+use RocketTheme\Toolbox\ResourceLocator\UniformResourceLocator;
+use RuntimeException;
+use function count;
+use function in_array;
+use function is_scalar;
+use function is_string;
+
+/**
+ * Class UserCollection
+ * @package Grav\Common\User\DataUser
+ */
+class UserCollection implements UserCollectionInterface
+{
+    /**
+     * UserCollection constructor.
+     * @param string $className
+     */
+    public function __construct(private readonly string $className)
+    {
+    }
+
+    /**
+     * Load user account.
+     *
+     * Always creates user object. To check if user exists, use $this->exists().
+     *
+     * @param string $username
+     * @return UserInterface
+     */
+    public function load($username): UserInterface
+    {
+        $username = (string)$username;
+
+        $grav = Grav::instance();
+        /** @var UniformResourceLocator $locator */
+        $locator = $grav['locator'];
+
+        // Filter username.
+        $username = $this->filterUsername($username);
+
+        // The locator normalizes the path, so './admin', '\admin' or 'x/../admin' would all open admin.yaml
+        // under a username of their own. A name save() refuses is not an account: return a user which does not exist.
+        $filename = 'account://' . (User::isValidUsername($username) ? $username : '') . YAML_EXT;
+        $path = $locator->findResource($filename) ?: $locator->findResource($filename, true, true);
+        if (!is_string($path)) {
+            throw new RuntimeException('Internal Error');
+        }
+        $file = CompiledYamlFile::instance($path);
+        $content = (array)$file->content() + ['username' => $username, 'state' => 'enabled'];
+
+        $userClass = $this->className;
+        $callable = static function () {
+            $blueprints = new Blueprints;
+
+            return $blueprints->get('user/account');
+        };
+
+        /** @var UserInterface $user */
+        $user = new $userClass($content, $callable);
+        $user->file($file);
+
+        return $user;
+    }
+
+    /**
+     * Find a user by username, email, etc
+     *
+     * @param string $query the query to search for
+     * @param array $fields the fields to search
+     * @return UserInterface
+     */
+    public function find($query, $fields = ['username', 'email']): UserInterface
+    {
+        $fields = (array)$fields;
+
+        $grav = Grav::instance();
+        /** @var UniformResourceLocator $locator */
+        $locator = $grav['locator'];
+
+        $account_dir = $locator->findResource('account://');
+        if (!is_string($account_dir)) {
+            return $this->load('');
+        }
+
+        $files = array_diff(scandir($account_dir) ?: [], ['.', '..']);
+
+        // Try with username first, you never know!
+        if (in_array('username', $fields, true)) {
+            $user = $this->load($query);
+            unset($fields[array_search('username', $fields, true)]);
+        } else {
+            $user = $this->load('');
+        }
+
+        // If not found, try the fields
+        if (!$user->exists()) {
+            $query = mb_strtolower($query);
+            foreach ($files as $file) {
+                if (Utils::endsWith($file, YAML_EXT)) {
+                    $find_user = $this->load(trim(Utils::pathinfo($file, PATHINFO_FILENAME)));
+                    foreach ($fields as $field) {
+                        // A list or a map in one account must not end the search for everybody else.
+                        $value = $find_user[$field] ?? null;
+                        if (is_scalar($value) && mb_strtolower((string) $value) === $query) {
+                            return $find_user;
+                        }
+                    }
+                }
+            }
+        }
+        return $user;
+    }
+
+    /**
+     * Remove user account.
+     *
+     * @param string $username
+     * @return bool True if the action was performed
+     */
+    public function delete($username): bool
+    {
+        if (!User::isValidUsername((string)$username)) {
+            return false;
+        }
+
+        $file_path = Grav::instance()['locator']->findResource('account://' . $username . YAML_EXT);
+        if (!$file_path) {
+            return false;
+        }
+
+        // Not while User::save() is checking and writing the same file.
+        $lock = User::lockAccountFile($file_path);
+        try {
+            return unlink($file_path);
+        } finally {
+            $lock->free();
+        }
+    }
+
+    /**
+     * @return int
+     */
+    public function count(): int
+    {
+        $grav = Grav::instance();
+        /** @var UniformResourceLocator $locator */
+        $locator = $grav['locator'];
+
+        // check for existence of a user account
+        $account_dir = $locator->findResource('account://');
+        if (!is_string($account_dir)) {
+            return 0;
+        }
+
+        // List the folder like find() does, not glob(): the install path would be part of the pattern,
+        // and a folder such as `site[1]` on it would match nothing (count 0 reopens the first-run setup).
+        $accounts = array_filter(
+            scandir($account_dir) ?: [],
+            static fn(string $file): bool => $file[0] !== '.' && Utils::endsWith($file, YAML_EXT)
+        );
+
+        return count($accounts);
+    }
+
+    /**
+     * @param string $username
+     * @return string
+     */
+    protected function filterUsername(string $username): string
+    {
+        return mb_strtolower($username);
+    }
+}

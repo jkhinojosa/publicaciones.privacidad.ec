@@ -1,0 +1,29 @@
+{# flex-objects/views/object.html.twig #}
+
+{% set flex = grav.get('flex_objects') %}
+{# The type can come from page content, so only a directory the site may show gets this far. #}
+{% set directory = flex.isDirectoryViewable(type) ? flex.directory(type) : null %}
+{% set object = directory ? directory.getObject(id) : null %}
+
+{% if object %}
+    {%- set title = options.title -%}
+    {%- if title matches '/\{/' -%}
+        {# The title comes from page frontmatter (page.header.flex.object.title)
+           and is editor-controlled. Render it through evaluate_twig (the sandboxed
+           Twig::processString path) instead of template_from_string, which would
+           produce an unsandboxed sub-template and turn an editor-supplied title
+           into arbitrary server-side Twig. GHSA-623v-m3c4-3pw8. #}
+        {%- set title = evaluate_twig(title)|trim -%}
+    {%- endif -%}
+    {% if title %}
+        {% do page.title(title) %}
+    {% endif %}
+
+    {% set layout = options.layout ?? 'default' %}
+    {% set context = options ?? {} %}
+
+    {% render object layout: layout with context|merge({title: title}) %}
+
+{% else %}
+    {% include 'flex-objects/views/404.html.twig' %}
+{% endif %}
