@@ -1,4 +1,4 @@
-name: Deploy Grav Blog to Hostinger
+name: Deploy Grav Blog to Hostinger (SSH)
 
 on:
   push:
@@ -6,40 +6,32 @@ on:
       - main
 
 jobs:
-  web-deploy:
+  deploy:
     name: 🎉 Deploy to Hostinger
     runs-on: ubuntu-latest
     steps:
-      - name: 🚚 Get latest code
+      - name: 🚚 Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
 
-      - name: 📂 Sync files via FTPS to Hostinger
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.HOSTINGER_FTP_SERVER }}
-          username: ${{ secrets.HOSTINGER_FTP_USERNAME }}
-          password: ${{ secrets.HOSTINGER_FTP_PASSWORD }}
-          port: 21
-          protocol: ftps
-          local-dir: ./
-          server-dir: ${{ secrets.HOSTINGER_TARGET_DIR || 'public_html/publicaciones/' }}
-          exclude: |
-            **/.git*
-            **/.git*/**
-            **/node_modules/**
-            .env.example
-            README.md
-            CONTRIBUTING.md
-            CHANGELOG.md
-            CODE_OF_CONDUCT.md
-            SECURITY.md
-            now.json
-            composer.json
-            composer.lock
-            cache/**
-            logs/**
-            backup/**
-            tmp/**
+      - name: 🔑 Setup SSH Keys
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.HOSTINGER_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p 65002 157.173.208.226 >> ~/.ssh/known_hosts
 
+      - name: 🚀 Sync files to Hostinger
+        run: |
+          rsync -avz \
+            --exclude='.git*' \
+            --exclude='/cache/*' \
+            --exclude='/logs/*' \
+            --exclude='/backup/*' \
+            --exclude='/tmp/*' \
+            -e "ssh -p 65002 -i ~/.ssh/id_ed25519" \
+            ./ u868810105@157.173.208.226:domains/privacidad.ec/public_html/publicaciones/
+
+      - name: 🧹 Clear Grav Cache on Hostinger
+        run: |
+          ssh -p 65002 -i ~/.ssh/id_ed25519 u868810105@157.173.208.226 \
+            "cd domains/privacidad.ec/public_html/publicaciones && /opt/alt/php83/usr/bin/php bin/grav cache"
