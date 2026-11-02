@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Privacidad.ec — Apple Privacy Design System (Full-Bleed Hero Background)
+   Privacidad.ec — Apple Privacy Design System (Full Viewport Screen Coverage)
    ========================================================================== */
 
 /* Dark Mode as Default and Primary Theme */
@@ -21,7 +21,7 @@ body {
 .header-fixed #header,
 header.navbar,
 .nav-wrapper {
-  background: rgba(0, 0, 0, 0.75) !important;
+  background: rgba(0, 0, 0, 0.7) !important;
   backdrop-filter: saturate(180%) blur(20px) !important;
   -webkit-backdrop-filter: saturate(180%) blur(20px) !important;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
@@ -51,7 +51,7 @@ header.navbar,
 :root[data-theme='light'] .logo-mode-light { display: block !important; }
 
 /* ==========================================================================
-   Full-Bleed Apple Privacy Hero Section
+   Full Viewport Hero Section (Mobile to Ultra-Wide / 4K)
    ========================================================================== */
 .apple-privacy-hero {
   position: relative;
@@ -60,30 +60,53 @@ header.navbar,
   right: 50%;
   margin-left: -50vw;
   margin-right: -50vw;
-  min-height: clamp(650px, 88vh, 920px);
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: 100dvh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   background-color: #000000;
   background-size: cover;
-  background-position: center top;
+  background-position: center 25%;
   background-repeat: no-repeat;
   border: none !important;
   border-radius: 0 !important;
   outline: none !important;
   box-shadow: none !important;
   overflow: hidden;
-  padding: clamp(7rem, 14vw, 11rem) 1.5rem clamp(5rem, 10vw, 8rem);
+  padding: clamp(5rem, 10vh, 7rem) 1.5rem clamp(4rem, 8vh, 6rem);
   text-align: center;
+  box-sizing: border-box;
 }
 
-/* Dark gradient overlay behind text to maximize contrast and ensure seamless fade into #000 */
+/* Responsiveness: Mobile and Tablet adjustments */
+@media (max-width: 768px) {
+  .apple-privacy-hero {
+    min-height: 100dvh;
+    height: 100dvh;
+    background-position: 60% center;
+    padding-inline: 1.25rem;
+    padding-top: 5rem;
+    padding-bottom: 4.5rem;
+  }
+}
+
+/* Ultra-wide and 4K displays */
+@media (min-width: 1800px) {
+  .apple-privacy-hero {
+    background-position: center 30%;
+  }
+}
+
+/* Gradient overlay to ensure text contrast while letting the face and shirt glow through */
 .apple-hero-overlay {
   position: absolute;
   inset: 0;
   background: 
-    radial-gradient(ellipse at 50% 40%, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.72) 75%, #000000 100%),
-    linear-gradient(to bottom, rgba(0, 0, 0, 0.65) 0%, rgba(0, 0, 0, 0.25) 45%, rgba(0, 0, 0, 0.85) 85%, #000000 100%);
+    radial-gradient(ellipse at 50% 50%, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0.75) 75%, #000000 100%),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.25) 40%, rgba(0, 0, 0, 0.75) 85%, #000000 100%);
   pointer-events: none;
   z-index: 1;
 }
@@ -91,41 +114,73 @@ header.navbar,
 .apple-hero-container {
   position: relative;
   z-index: 2;
-  max-width: 960px;
-  margin: 0 auto;
+  max-width: 980px;
+  margin: auto;
   padding: 0 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 .apple-hero-eyebrow {
   display: inline-block;
-  font-size: clamp(0.95rem, 1.4vw, 1.2rem);
+  font-size: clamp(0.9rem, 1.4vw, 1.15rem);
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: #a1a1a6;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95);
   margin-bottom: 1.25rem;
 }
 
 .apple-hero-title {
-  font-size: clamp(2.8rem, 6.5vw, 5rem);
+  font-size: clamp(2.4rem, 6.2vw, 4.8rem);
   font-weight: 800;
   letter-spacing: -0.035em;
-  line-height: 1.05;
+  line-height: 1.06;
   color: #ffffff;
-  text-shadow: 0 4px 30px rgba(0, 0, 0, 0.95), 0 2px 10px rgba(0, 0, 0, 0.8);
+  text-shadow: 0 4px 30px rgba(0, 0, 0, 0.95), 0 2px 10px rgba(0, 0, 0, 0.9);
   max-width: 900px;
   margin: 0 auto 1.5rem;
 }
 
 .apple-hero-subtitle {
-  font-size: clamp(1.2rem, 2.3vw, 1.55rem);
+  font-size: clamp(1.1rem, 2.2vw, 1.45rem);
   font-weight: 400;
   line-height: 1.5;
   color: #e5e5ea;
-  text-shadow: 0 3px 20px rgba(0, 0, 0, 0.95), 0 1px 6px rgba(0, 0, 0, 0.8);
+  text-shadow: 0 3px 20px rgba(0, 0, 0, 0.95), 0 1px 6px rgba(0, 0, 0, 0.9);
   max-width: 780px;
   margin: 0 auto;
+}
+
+/* Scroll down indicator button */
+.apple-scroll-down {
+  position: absolute;
+  bottom: 1.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  color: rgba(255, 255, 255, 0.6);
+  transition: color 0.3s ease, transform 0.3s ease;
+  animation: appleBounce 2.4s infinite ease-in-out;
+}
+
+.apple-scroll-down:hover {
+  color: #ffffff;
+}
+
+@keyframes appleBounce {
+  0%, 20%, 50%, 80%, 100% {
+    transform: translate(-50%, 0);
+  }
+  40% {
+    transform: translate(-50%, -8px);
+  }
+  60% {
+    transform: translate(-50%, -4px);
+  }
 }
 
 /* ==========================================================================
