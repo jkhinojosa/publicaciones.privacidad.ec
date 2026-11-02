@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Privacidad.ec — Apple Privacy Design System
+   Privacidad.ec — Apple Privacy Design System (Full-Bleed Hero Background)
    ========================================================================== */
 
 /* Dark Mode as Default and Primary Theme */
@@ -12,6 +12,8 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "Inter", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+  padding: 0;
 }
 
 /* Header / Navigation — Apple Frosted Glass */
@@ -19,24 +21,26 @@ body {
 .header-fixed #header,
 header.navbar,
 .nav-wrapper {
-  background: rgba(0, 0, 0, 0.8) !important;
+  background: rgba(0, 0, 0, 0.75) !important;
   backdrop-filter: saturate(180%) blur(20px) !important;
   -webkit-backdrop-filter: saturate(180%) blur(20px) !important;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
   transition: background-color 0.4s ease, border-color 0.4s ease;
+  z-index: 100 !important;
 }
 
 /* Header nav links */
 .navbar section.navbar-section a,
 .navbar a {
-  color: #86868b !important;
+  color: #a1a1a6 !important;
+  font-weight: 500 !important;
   transition: color 0.2s ease;
 }
 
 .navbar section.navbar-section a:hover,
 .navbar a:hover,
 .navbar section.navbar-section a.active {
-  color: #f5f5f7 !important;
+  color: #ffffff !important;
 }
 
 /* Logo toggling */
@@ -46,91 +50,92 @@ header.navbar,
 :root[data-theme='light'] .logo-mode-dark { display: none !important; }
 :root[data-theme='light'] .logo-mode-light { display: block !important; }
 
-/* Apple Privacy Hero Section */
+/* ==========================================================================
+   Full-Bleed Apple Privacy Hero Section
+   ========================================================================== */
 .apple-privacy-hero {
-  background-color: #000000;
-  padding-top: clamp(4rem, 8vw, 6.5rem);
-  padding-bottom: clamp(3rem, 6vw, 5rem);
-  text-align: center;
   position: relative;
+  width: 100vw;
+  left: 50%;
+  right: 50%;
+  margin-left: -50vw;
+  margin-right: -50vw;
+  min-height: clamp(650px, 88vh, 920px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #000000;
+  background-size: cover;
+  background-position: center top;
+  background-repeat: no-repeat;
+  border: none !important;
+  border-radius: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
   overflow: hidden;
+  padding: clamp(7rem, 14vw, 11rem) 1.5rem clamp(5rem, 10vw, 8rem);
+  text-align: center;
+}
+
+/* Dark gradient overlay behind text to maximize contrast and ensure seamless fade into #000 */
+.apple-hero-overlay {
+  position: absolute;
+  inset: 0;
+  background: 
+    radial-gradient(ellipse at 50% 40%, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.72) 75%, #000000 100%),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.65) 0%, rgba(0, 0, 0, 0.25) 45%, rgba(0, 0, 0, 0.85) 85%, #000000 100%);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .apple-hero-container {
-  max-width: 1080px;
+  position: relative;
+  z-index: 2;
+  max-width: 960px;
   margin: 0 auto;
   padding: 0 1.5rem;
 }
 
 .apple-hero-eyebrow {
   display: inline-block;
-  font-size: clamp(0.95rem, 1.4vw, 1.15rem);
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  font-size: clamp(0.95rem, 1.4vw, 1.2rem);
+  font-weight: 700;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #86868b;
-  margin-bottom: 1rem;
+  color: #a1a1a6;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9);
+  margin-bottom: 1.25rem;
 }
 
 .apple-hero-title {
-  font-size: clamp(2.6rem, 6vw, 4.6rem);
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  line-height: 1.06;
-  color: #f5f5f7;
+  font-size: clamp(2.8rem, 6.5vw, 5rem);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+  color: #ffffff;
+  text-shadow: 0 4px 30px rgba(0, 0, 0, 0.95), 0 2px 10px rgba(0, 0, 0, 0.8);
   max-width: 900px;
   margin: 0 auto 1.5rem;
 }
 
 .apple-hero-subtitle {
-  font-size: clamp(1.15rem, 2.2vw, 1.45rem);
+  font-size: clamp(1.2rem, 2.3vw, 1.55rem);
   font-weight: 400;
-  line-height: 1.45;
-  color: #a1a1a6;
-  max-width: 760px;
-  margin: 0 auto 3rem;
-}
-
-.apple-hero-media {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  position: relative;
-  max-width: 980px;
+  line-height: 1.5;
+  color: #e5e5ea;
+  text-shadow: 0 3px 20px rgba(0, 0, 0, 0.95), 0 1px 6px rgba(0, 0, 0, 0.8);
+  max-width: 780px;
   margin: 0 auto;
-  border-radius: 28px;
-  overflow: hidden;
-  box-shadow: 0 25px 90px rgba(0, 0, 0, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.apple-hero-portrait {
-  width: 100%;
-  height: auto;
-  display: block;
-  object-fit: cover;
-  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.apple-hero-media:hover .apple-hero-portrait {
-  transform: scale(1.015);
-}
-
-/* Subtle gradient mask so the hero image seamlessly merges into pure black */
-.apple-hero-media::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(circle at center, transparent 65%, rgba(0, 0, 0, 0.4) 100%),
-              linear-gradient(to bottom, transparent 80%, rgba(0, 0, 0, 0.6) 100%);
-}
-
-/* Blog Content & Cards Section */
+/* ==========================================================================
+   Blog Content & Cards Section
+   ========================================================================== */
 #body-wrapper,
 .blog-listing {
   background-color: #000000 !important;
   padding-block: 4rem;
+  border: none !important;
 }
 
 .blog-grid {

@@ -2,18 +2,13 @@
 {% set content = content|default(page.content) %}
 
 {% if page.header.hero_style == 'apple' or id == 'blog-hero' %}
-<section id="{{ id }}" class="apple-privacy-hero">
+<section id="{{ id }}" class="apple-privacy-hero" {% if hero_image %}style="background-image: url('{{ hero_image.url }}');"{% endif %}>
+    <div class="apple-hero-overlay"></div>
     <div class="apple-hero-container">
         <span class="apple-hero-eyebrow">{{ page.header.eyebrow|default('Privacidad') }}</span>
         <h1 class="apple-hero-title">{{ page.header.hero_title|default(page.title) }}</h1>
         {% if page.header.hero_subtitle or page.header.subtitle %}
             <p class="apple-hero-subtitle">{{ page.header.hero_subtitle|default(page.header.subtitle) }}</p>
-        {% endif %}
-
-        {% if hero_image %}
-        <div class="apple-hero-media">
-            <img src="{{ hero_image.url }}" alt="{{ page.title|e('html_attr') }}" class="apple-hero-portrait" />
-        </div>
         {% endif %}
 
         {% if content|striptags|trim is not empty %}
